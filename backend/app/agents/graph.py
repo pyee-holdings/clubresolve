@@ -108,13 +108,12 @@ async def invoke_graph(
         "current_agent": "navigator",
         "delegation_task": None,
         "escalation_level": case.escalation_level or 0,
-        # Initialize accumulator fields
-        "legal_findings": [],
-        "evidence_items": [],
-        "timeline_events": [],
-        "contradictions": [],
-        "unanswered_questions": [],
-        "drafts_generated": [],
+        # Note: accumulator fields (evidence_items, timeline_events,
+        # drafts_generated, etc.) are NOT passed here. They use append
+        # reducers in CaseState and are managed by the checkpoint.
+        # Passing [] would merge with checkpoint state via operator.add,
+        # causing the final result to contain ALL items from ALL prior
+        # invocations — leading to duplicates in DB writes.
     }
 
     config = {
@@ -143,6 +142,7 @@ async def invoke_graph(
         "agent": agent_name,
         "next_steps": result.get("next_steps"),
         "evidence_added": result.get("evidence_items"),
+        "timeline_events": result.get("timeline_events"),
         "draft_generated": result.get("drafts_generated"),
         "legal_findings": result.get("legal_findings"),
         "metadata": {

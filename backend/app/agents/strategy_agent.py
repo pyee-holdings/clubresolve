@@ -1,20 +1,65 @@
 """Navigator (Strategy Agent) — the supervisor node.
 
-This is the hub of the entire system. Every user message enters here,
-and every specialist returns results here. The Navigator decides:
-- Whether to respond directly to the user
-- Whether to delegate to Counsel (legal research)
-- Whether to delegate to Vault (evidence organization)
-- Whether to delegate to Draft Studio (communication drafting)
+Uses LLM tool calling for reliable delegation instead of parsing JSON from text.
 """
 
 import json
+from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.tools import tool
 from langgraph.types import Command
 
 from app.agents.state import CaseState
 from app.agents.prompts.strategy import NAVIGATOR_SYSTEM_PROMPT
+
+
+@tool
+def delegate_to_counsel(task: str) -> str:
+    """Delegate a research task to the Counsel agent for policy/governance analysis.
+
+    Use this when you need to research BC laws, club bylaws, SafeSport policies,
+    or any governance-related regulations relevant to the parent's case.
+
+    Args:
+        task: Specific research question, e.g. "Research what the BC Societies Act says about member rights to inspect financial records"
+    """
+    return f"Delegating to Counsel: {task}"
+
+
+@tool
+def delegate_to_vault(task: str) -> str:
+    """Delegate an evidence organization task to the Vault agent.
+
+    Use this when you need to organize evidence, build timelines, extract key facts
+    from documents, identify contradictions, or prepare escalation-ready summaries.
+
+    Args:
+        task: Specific evidence task, e.g. "Organize the email chain into a timeline of events with key issues highlighted"
+    """
+    return f"Delegating to Vault: {task}"
+
+
+@tool
+def delegate_to_drafts(task: str) -> str:
+    """Delegate a communication drafting task to the Draft Studio agent.
+
+    Use this when you need to draft emails, letters, complaints, or other
+    communications for the parent to send.
+
+    Args:
+        task: Specific drafting task, e.g. "Draft a polite inquiry email to the club treasurer requesting an itemized breakdown"
+    """
+    return f"Delegating to Draft Studio: {task}"
+
+
+DELEGATION_TOOLS = [delegate_to_counsel, delegate_to_vault, delegate_to_drafts]
+
+TOOL_TO_AGENT = {
+    "delegate_to_counsel": "counsel_agent",
+    "delegate_to_vault": "vault_agent",
+    "delegate_to_drafts": "drafts_agent",
+}
 
 
 def _build_context_summary(state: CaseState) -> str:
@@ -38,11 +83,10 @@ def _build_context_summary(state: CaseState) -> str:
     if state.get("description"):
         parts.append(f"Description: {state['description']}")
 
-    # Include specialist findings if available
     if state.get("legal_findings"):
         findings_summary = "; ".join(
             f"{f.get('finding', '')} [{f.get('confidence', 'unknown')} confidence]"
-            for f in state["legal_findings"][-3:]  # Last 3 findings
+            for f in state["legal_findings"][-3:]
         )
         parts.append(f"Recent Legal Findings: {findings_summary}")
 
@@ -58,10 +102,15 @@ def _build_context_summary(state: CaseState) -> str:
 async def navigator_node(state: CaseState, config) -> Command:
     """Navigator agent node — the supervisor/case manager.
 
-    Receives every user message and decides what to do next.
-    Returns a Command that either responds to the user or delegates to a specialist.
+    Uses tool calling for delegation. The LLM can either:
+    1. Respond directly (no tool call) → end turn
+    2. Call a delegation tool → route to specialist
+    3. Respond AND call a tool → respond then route
     """
     llm = config["configurable"]["llm"]
+
+    # Bind delegation tools to the LLM
+    llm_with_tools = llm.bind_tools(DELEGATION_TOOLS)
 
     # Build the system message with case context
     context = _build_context_summary(state)
@@ -69,65 +118,62 @@ async def navigator_node(state: CaseState, config) -> Command:
     if context:
         system_content += f"\n\n## Current Case Context\n{context}"
 
-    # Add instruction for structured decision-making
     system_content += """
 
-## Decision Format
-After analyzing the user's message, respond in this JSON format ONLY if you need to delegate:
-{"delegate_to": "counsel|vault|drafts", "task": "specific task description"}
+## Delegation Instructions
+You have access to three delegation tools. Use them ONLY when the conditions below are clearly met:
 
-If you are responding directly to the user (most common), just respond naturally in plain text.
-If you need to delegate AND respond, first write your response to the user, then on a new line write the JSON delegation.
+- **delegate_to_vault**: Call this ONLY when the user has **provided actual evidence content** in the conversation — e.g., they pasted an email, shared specific dates/names/quotes, or described concrete events with verifiable details. Do NOT delegate if the user merely *mentions* having evidence (e.g., "I have an email from the coach"). Instead, ask them to share it: "Could you paste the email or share the key details so I can organize it?"
+
+- **delegate_to_counsel**: Call this ONLY when a **specific policy or legal question** arises that you cannot answer from existing case context — e.g., "What does the BC Societies Act say about member rights to financial records?"
+
+- **delegate_to_drafts**: Call this ONLY when the user **explicitly asks for a draft** AND you have enough specifics (who the recipient is, what the issue is, what tone). If the user says something vague like "I want to write a complaint," ask clarifying questions first: "Who would you like to send this to? What specific issue should it address?"
+
+## When NOT to Delegate
+- The user is still describing their situation or asking general questions — respond directly
+- The user mentions evidence they have but hasn't shared it yet — ask them to provide it
+- The user wants a draft but hasn't specified recipient/issue — ask clarifying questions
+- You're providing an assessment, next steps, or general guidance — respond directly
+
+When you identify next steps, include them in your response clearly numbered.
 """
 
     messages = [SystemMessage(content=system_content)] + list(state["messages"])
 
-    response = await llm.ainvoke(messages)
-    response_text = response.content
+    response = await llm_with_tools.ainvoke(messages)
 
-    # Check if the response includes a delegation
-    delegation = None
-    user_response = response_text
+    # Check if the LLM made a tool call
+    tool_calls = getattr(response, "tool_calls", None) or []
 
-    # Try to extract delegation JSON from the end of the response
-    lines = response_text.strip().split("\n")
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if line.startswith('{"delegate_to"'):
-            try:
-                delegation = json.loads(line)
-                user_response = "\n".join(lines[:i]).strip()
-                break
-            except json.JSONDecodeError:
-                pass
-
-    # Build state updates
     updates = {"current_agent": "navigator"}
 
-    if delegation and delegation.get("delegate_to") in ("counsel", "vault", "drafts"):
-        target = delegation["delegate_to"]
-        task = delegation.get("task", "")
+    # Extract text content (may be empty if only tool call)
+    response_text = response.content or ""
 
-        agent_map = {
-            "counsel": "counsel_agent",
-            "vault": "vault_agent",
-            "drafts": "drafts_agent",
-        }
+    if tool_calls:
+        # Get the first delegation tool call
+        tc = tool_calls[0]
+        tool_name = tc["name"]
+        tool_args = tc["args"]
 
-        # Add the user response as a message if there is one
-        if user_response:
-            updates["messages"] = [AIMessage(content=user_response)]
+        if tool_name in TOOL_TO_AGENT:
+            target_agent = TOOL_TO_AGENT[tool_name]
+            task = tool_args.get("task", "")
 
-        updates["delegation_task"] = task
+            if response_text:
+                updates["messages"] = [AIMessage(content=response_text)]
 
-        # Add a message for the specialist
-        return Command(
-            goto=agent_map[target],
-            update=updates,
-        )
+            updates["delegation_task"] = task
 
-    # Direct response — no delegation
-    updates["messages"] = [AIMessage(content=user_response)]
+            return Command(
+                goto=target_agent,
+                update=updates,
+            )
+
+    # No delegation — direct response
+    if response_text:
+        updates["messages"] = [AIMessage(content=response_text)]
+
     return Command(
         goto="__end__",
         update=updates,

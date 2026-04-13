@@ -61,9 +61,17 @@ async def drafts_node(state: CaseState, config) -> Command:
 
     system_content += """
 
+## Before Drafting
+If the delegation task is vague or you lack key details (recipient, specific issue, desired tone), do NOT generate a speculative draft. Instead, respond with what information you still need. For example:
+- "To draft this email, I need to know: (1) Who is the recipient? (2) What specific issue should it address?"
+
+Only generate a draft when you have enough concrete details to write something useful and accurate.
+
 ## Output Format
-Write the draft communication, then on a new line provide a JSON summary:
+When you DO have enough info to draft, write the communication, then on a new line provide a JSON summary:
 {"draft_type": "email|letter|complaint|memo|question", "title": "Subject/title", "recipient": "Who this goes to", "tone": "professional|firm|conciliatory"}
+
+If you are NOT drafting (because you need more info), just respond with your questions — do NOT include the JSON summary line.
 """
 
     messages = [
@@ -74,40 +82,37 @@ Write the draft communication, then on a new line provide a JSON summary:
     response = await llm.ainvoke(messages)
     response_text = response.content
 
-    # Parse the draft metadata
-    draft_meta = {
-        "type": "email",
-        "title": "Draft Communication",
-        "content": response_text,
-        "recipient": None,
-        "tone": "professional",
-    }
-
+    # Parse the draft metadata — only if the agent actually produced a draft
+    draft_meta = None
     lines = response_text.strip().split("\n")
     for line in reversed(lines):
         line = line.strip()
         if line.startswith('{"draft_type"'):
             try:
                 parsed = json.loads(line)
-                draft_meta["type"] = parsed.get("draft_type", "email")
-                draft_meta["title"] = parsed.get("title", "Draft Communication")
-                draft_meta["recipient"] = parsed.get("recipient")
-                draft_meta["tone"] = parsed.get("tone", "professional")
-                # Remove the JSON line from the content
-                draft_meta["content"] = "\n".join(lines[:-1]).strip()
+                draft_meta = {
+                    "type": parsed.get("draft_type", "email"),
+                    "title": parsed.get("title", "Draft Communication"),
+                    "content": "\n".join(lines[:-1]).strip(),
+                    "recipient": parsed.get("recipient"),
+                    "tone": parsed.get("tone", "professional"),
+                }
                 break
             except json.JSONDecodeError:
                 pass
 
     updates = {
         "current_agent": "navigator",
-        "drafts_generated": [draft_meta],
         "messages": [
             AIMessage(
-                content=f"[Draft Studio]\n\n{draft_meta['content']}",
+                content=f"[Draft Studio]\n\n{draft_meta['content'] if draft_meta else response_text}",
                 name="drafts",
             )
         ],
     }
+
+    # Only store draft if one was actually generated (not just clarifying questions)
+    if draft_meta:
+        updates["drafts_generated"] = [draft_meta]
 
     return Command(goto="navigator_agent", update=updates)
