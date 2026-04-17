@@ -7,7 +7,7 @@ import { useCaseStore } from "@/stores/caseStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Settings, Shield, FileText, Scale, PenTool, Trash2 } from "lucide-react";
+import { Plus, Settings, Shield, FileText, Scale, PenTool, Trash2, Sparkles } from "lucide-react";
 
 export default function Dashboard() {
   const router = useRouter();
@@ -89,6 +89,20 @@ export default function Dashboard() {
               <div>
                 <p className="font-medium">New Case</p>
                 <p className="text-xs text-muted-foreground">Start a new dispute case</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card
+            className="cursor-pointer transition-shadow hover:shadow-md"
+            onClick={() => router.push("/wizard")}
+          >
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="rounded-lg bg-indigo-100 p-2">
+                <Sparkles className="h-5 w-5 text-indigo-600" />
+              </div>
+              <div>
+                <p className="font-medium">Action Plan Wizard</p>
+                <p className="text-xs text-muted-foreground">6 questions → personalized plan</p>
               </div>
             </CardContent>
           </Card>

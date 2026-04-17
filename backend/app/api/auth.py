@@ -2,9 +2,9 @@
 
 from datetime import datetime, timedelta
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +16,21 @@ from app.schemas.user import UserCreate, UserLogin, UserResponse, Token
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+
+def _pw_bytes(password: str) -> bytes:
+    # bcrypt hard-caps input at 72 bytes; anything beyond is silently ignored
+    # by the algorithm. Truncate explicitly so bcrypt 5 doesn't raise.
+    return password.encode("utf-8")[:72]
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(_pw_bytes(password), hashed.encode("utf-8"))
 
 
 def create_access_token(data: dict) -> str:
@@ -62,7 +75,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     user = User(
         email=user_data.email,
         name=user_data.name,
-        hashed_password=pwd_context.hash(user_data.password),
+        hashed_password=hash_password(user_data.password),
     )
     db.add(user)
     await db.flush()
@@ -73,7 +86,7 @@ async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
 async def login(user_data: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == user_data.email))
     user = result.scalar_one_or_none()
-    if not user or not pwd_context.verify(user_data.password, user.hashed_password):
+    if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access_token = create_access_token(data={"sub": user.id})

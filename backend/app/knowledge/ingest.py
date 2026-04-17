@@ -25,7 +25,7 @@ def ingest_knowledge_base():
     # Delete and recreate collection for clean re-ingestion
     try:
         client.delete_collection("bc_sports_governance")
-    except ValueError:
+    except Exception:
         pass
 
     collection = client.create_collection(

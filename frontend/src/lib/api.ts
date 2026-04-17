@@ -140,6 +140,37 @@ class ApiClient {
   async listDrafts(caseId: string) {
     return this.request<Array<Record<string, unknown>>>(`/api/cases/${caseId}/drafts`);
   }
+
+  // Wizard
+  async generateActionPlan(intake: {
+    province: string;
+    sport: string;
+    category: string;
+    tried: string;
+    desired_outcome: string;
+    description: string;
+    email: string;
+  }) {
+    return this.request<{
+      summary: string;
+      steps: Array<{
+        title: string;
+        description: string;
+        citation: string;
+        template: string;
+        deadline: string;
+      }>;
+      escalation_timeline: Array<{
+        if: string;
+        then: string;
+        deadline: string;
+      }>;
+      disclaimer: string;
+    }>("/api/wizard/generate", {
+      method: "POST",
+      body: JSON.stringify(intake),
+    });
+  }
 }
 
 export const api = new ApiClient();
