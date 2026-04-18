@@ -1,7 +1,7 @@
 """Case CRUD endpoints."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import delete, select
@@ -163,6 +163,16 @@ async def retry_intake_review(
     return case
 
 
+# If a visit lands within this window of the previous visit, we treat it as
+# a no-op: return the existing `previous` timestamp without moving it
+# forward. This solves two problems at once:
+#   (a) React StrictMode double-mount or hot-reload double-fires don't
+#       clobber the "last visit" with "just now".
+#   (b) Two concurrent visit requests within the window see the same
+#       previous value instead of racing on read-then-write.
+_VISIT_DEBOUNCE = timedelta(minutes=5)
+
+
 @router.post("/{case_id}/visit", response_model=VisitResponse)
 async def mark_case_visited(
     case_id: str,
@@ -175,8 +185,11 @@ async def mark_case_visited(
     new value. The frontend uses the previous value to compute "what's
     new since your last visit" against entity created_at timestamps.
 
-    Called by the case detail page on mount. Safe to call repeatedly —
-    the previous_visited_at will simply move forward with each call.
+    Debounced: calls within ``_VISIT_DEBOUNCE`` of the previous visit are
+    treated as idempotent — the stored timestamp is not advanced and the
+    same ``previous_visited_at`` is returned. That keeps consecutive
+    mounts (e.g., dev hot reload, StrictMode) from burning through the
+    real previous-visit timestamp.
     """
     result = await db.execute(
         select(Case).where(Case.id == case_id, Case.user_id == current_user.id)
@@ -186,10 +199,17 @@ async def mark_case_visited(
         raise HTTPException(status_code=404, detail="Case not found")
 
     previous = case.last_visited_at
-    current = datetime.utcnow()
-    case.last_visited_at = current
+    now = datetime.utcnow()
+    if previous is not None and now - previous < _VISIT_DEBOUNCE:
+        # Recent visit — no-op. Return the pre-existing "previous" so the
+        # caller sees a stable anchor for "what's new since last visit".
+        return VisitResponse(
+            previous_visited_at=previous, current_visited_at=previous
+        )
+
+    case.last_visited_at = now
     await db.flush()
-    return VisitResponse(previous_visited_at=previous, current_visited_at=current)
+    return VisitResponse(previous_visited_at=previous, current_visited_at=now)
 
 
 @router.post("/{case_id}/plan/regenerate", response_model=CaseResponse)

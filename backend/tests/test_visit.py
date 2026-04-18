@@ -1,13 +1,23 @@
-"""Phase D: tests for the /visit endpoint and last_visited_at semantics."""
+"""Phase D: tests for the /visit endpoint and last_visited_at semantics.
+
+We cover two layers:
+  1. `last_visited_at` column semantics via direct mutation.
+  2. `/api/cases/:id/visit` endpoint behavior via FastAPI TestClient with
+     an in-memory SQLite override. The latter proves the capture-then-
+     update ordering, owner enforcement, and the debounce.
+"""
 
 import asyncio
 from datetime import datetime, timedelta
 
 import pytest
+import pytest_asyncio
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.database import Base
+from app.database import Base, get_db
+from app.main import app
 from app.models.case import Case
 from app.models.user import User
 
@@ -94,3 +104,133 @@ class TestLastVisitedAtSemantics:
             await db_session.commit()
             await asyncio.sleep(0.01)
         assert times[0] <= times[1] <= times[2]
+
+
+# ── HTTP-level tests via FastAPI TestClient ────────────
+
+
+@pytest_asyncio.fixture
+async def http_db():
+    """Per-test in-memory SQLite, overriding the get_db dependency for the
+    whole FastAPI app. Each test gets a fresh schema."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override():
+        async with Session() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = override
+    yield Session
+    app.dependency_overrides.pop(get_db, None)
+    await engine.dispose()
+
+
+def _register_and_login(client: TestClient, email: str) -> str:
+    client.post(
+        "/api/auth/register",
+        json={"email": email, "name": "t", "password": "password123"},
+    )
+    r = client.post(
+        "/api/auth/login",
+        json={"email": email, "password": "password123"},
+    )
+    return r.json()["access_token"]
+
+
+class TestVisitEndpoint:
+    def test_first_visit_returns_null_previous(self, http_db):
+        with TestClient(app) as client:
+            token = _register_and_login(client, "a@x.com")
+            headers = {"Authorization": f"Bearer {token}"}
+            case = client.post(
+                "/api/cases", headers=headers, json={"title": "x"}
+            ).json()
+            r = client.post(
+                f"/api/cases/{case['id']}/visit", headers=headers
+            )
+            assert r.status_code == 200
+            body = r.json()
+            assert body["previous_visited_at"] is None
+            assert body["current_visited_at"] is not None
+
+    def test_second_visit_returns_first_visit_time(self, http_db):
+        """Outside the debounce window, second visit advances the stored
+        timestamp and returns the first visit's time as previous."""
+        import app.api.cases as cases_mod
+
+        with TestClient(app) as client:
+            token = _register_and_login(client, "b@x.com")
+            headers = {"Authorization": f"Bearer {token}"}
+            case = client.post(
+                "/api/cases", headers=headers, json={"title": "x"}
+            ).json()
+            original_debounce = cases_mod._VISIT_DEBOUNCE
+            cases_mod._VISIT_DEBOUNCE = timedelta(0)
+            try:
+                first = client.post(
+                    f"/api/cases/{case['id']}/visit", headers=headers
+                ).json()
+                second = client.post(
+                    f"/api/cases/{case['id']}/visit", headers=headers
+                ).json()
+            finally:
+                cases_mod._VISIT_DEBOUNCE = original_debounce
+            assert second["previous_visited_at"] == first["current_visited_at"]
+            assert second["current_visited_at"] >= first["current_visited_at"]
+
+    def test_debounce_returns_stable_timestamp(self, http_db):
+        """Two calls within the debounce window return the same current
+        timestamp — the stored last_visited_at did not advance. This
+        prevents React StrictMode / double-mount from burning through
+        the real previous-visit anchor."""
+        with TestClient(app) as client:
+            token = _register_and_login(client, "c@x.com")
+            headers = {"Authorization": f"Bearer {token}"}
+            case = client.post(
+                "/api/cases", headers=headers, json={"title": "x"}
+            ).json()
+            first = client.post(
+                f"/api/cases/{case['id']}/visit", headers=headers
+            ).json()
+            second = client.post(
+                f"/api/cases/{case['id']}/visit", headers=headers
+            ).json()
+            # First visit establishes the anchor.
+            assert first["previous_visited_at"] is None
+            # Within debounce: no-op. previous == current == the first visit.
+            assert second["previous_visited_at"] == first["current_visited_at"]
+            assert second["current_visited_at"] == first["current_visited_at"]
+
+    def test_cross_user_visit_is_404(self, http_db):
+        with TestClient(app) as client:
+            owner_token = _register_and_login(client, "owner@x.com")
+            case = client.post(
+                "/api/cases",
+                headers={"Authorization": f"Bearer {owner_token}"},
+                json={"title": "x"},
+            ).json()
+            other_token = _register_and_login(client, "other@x.com")
+            r = client.post(
+                f"/api/cases/{case['id']}/visit",
+                headers={"Authorization": f"Bearer {other_token}"},
+            )
+            assert r.status_code == 404
+
+    def test_unauthenticated_is_401(self, http_db):
+        with TestClient(app) as client:
+            token = _register_and_login(client, "d@x.com")
+            case = client.post(
+                "/api/cases",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"title": "x"},
+            ).json()
+            r = client.post(f"/api/cases/{case['id']}/visit")
+            assert r.status_code == 401

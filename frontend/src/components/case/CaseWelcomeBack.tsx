@@ -111,6 +111,13 @@ function chooseNextAction(
       target: "strategy",
     };
   }
+  if (activeCase.plan_status === "error") {
+    return {
+      label: "Retry the plan",
+      detail: "The last planning attempt failed. Run it again.",
+      target: "strategy",
+    };
+  }
   if (activeCase.plan_status === "idle") {
     return {
       label: "Run the strategic plan",
@@ -148,12 +155,22 @@ export function CaseWelcomeBack({
     }
   }, [activeCase.id]);
 
+  // Refresh when the case's updated_at changes — this catches any Review
+  // tab action (answering a question, fulfilling evidence) that reloaded
+  // the case in the parent. Without this, the "next action" would keep
+  // pointing at a question the user already answered.
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, activeCase.updated_at]);
 
   const whatsNew = useMemo(() => {
     if (!questions || !evidenceRequests) return null;
+    // On the very first visit `previousVisitedAt` is null — we don't want
+    // to claim everything is "new since your last visit" because there
+    // was no prior visit. The first-visit branch below handles that case.
+    if (previousVisitedAt === null) {
+      return { newQuestions: [], newEvidence: [], planFresh: false };
+    }
     const newQuestions = questions.filter((q) =>
       isAfter(q.created_at, previousVisitedAt),
     );

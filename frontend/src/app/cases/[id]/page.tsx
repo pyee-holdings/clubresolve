@@ -41,12 +41,14 @@ export default function CaseDetailPage() {
     }
   }, [user, isLoading, caseId, router, loadCase]);
 
-  // Record this visit exactly once per case-open. Fires after the case has
-  // loaded so the UI has data to render against while this runs.
+  // Record this visit exactly once per caseId. Next.js App Router reuses
+  // the [id] route component across dynamic-segment changes, so we must
+  // reset previousVisitedAt when caseId changes rather than relying on
+  // remount.
   useEffect(() => {
     if (!user || !caseId) return;
-    if (previousVisitedAt !== undefined) return;
     let cancelled = false;
+    setPreviousVisitedAt(undefined);
     api
       .markCaseVisited(caseId)
       .then((r) => {
@@ -60,7 +62,7 @@ export default function CaseDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, caseId, previousVisitedAt]);
+  }, [user, caseId]);
 
   // Auto-select the Review tab when the agent still needs answers.
   // Only runs when the user hasn't already switched tabs.
