@@ -64,6 +64,12 @@ class Case(Base):
     plan_status: Mapped[str] = mapped_column(String(20), default="idle")
     plan_generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Return-visit tracking (Phase D). Updated when the user loads the case
+    # detail page via POST /visit. The endpoint returns the PREVIOUS value so
+    # the UI can compute "what's new since your last visit" against the
+    # created_at timestamps on questions / evidence / etc.
+    last_visited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

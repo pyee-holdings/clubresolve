@@ -43,6 +43,8 @@ _COLUMN_BACKFILLS: list[tuple[str, str, str]] = [
     # Phase C: strategic planner lifecycle.
     ("cases", "plan_status", "VARCHAR(20) NOT NULL DEFAULT 'idle'"),
     ("cases", "plan_generated_at", "DATETIME"),
+    # Phase D: return-visit tracking.
+    ("cases", "last_visited_at", "DATETIME"),
 ]
 
 

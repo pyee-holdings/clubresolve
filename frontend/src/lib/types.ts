@@ -40,8 +40,14 @@ export interface Case {
   missing_info: string[] | null;
   plan_status: "idle" | "planning" | "ready" | "error";
   plan_generated_at: string | null;
+  last_visited_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface VisitResponse {
+  previous_visited_at: string | null;
+  current_visited_at: string;
 }
 
 export interface PlanStep {

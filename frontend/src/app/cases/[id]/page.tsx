@@ -5,9 +5,11 @@ import { useRouter, useParams } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { useCaseStore } from "@/stores/caseStore";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { CaseWelcomeBack } from "@/components/case/CaseWelcomeBack";
 import { ReviewPanel } from "@/components/intake/ReviewPanel";
 import { EvidenceRequestPanel } from "@/components/intake/EvidenceRequestPanel";
 import { StrategyPanel } from "@/components/strategy/StrategyPanel";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +23,11 @@ export default function CaseDetailPage() {
   const { user, isLoading, loadFromStorage } = useAuthStore();
   const { activeCase, loadCase } = useCaseStore();
   const [sidebarTab, setSidebarTab] = useState<string | null>(null);
+  // Captured from the /visit endpoint — the previous last_visited_at
+  // BEFORE this visit. Null on first visit ever.
+  const [previousVisitedAt, setPreviousVisitedAt] = useState<string | null | undefined>(
+    undefined, // undefined = not yet captured, null = never visited before
+  );
 
   useEffect(() => {
     loadFromStorage();
@@ -33,6 +40,27 @@ export default function CaseDetailPage() {
       loadCase(caseId);
     }
   }, [user, isLoading, caseId, router, loadCase]);
+
+  // Record this visit exactly once per case-open. Fires after the case has
+  // loaded so the UI has data to render against while this runs.
+  useEffect(() => {
+    if (!user || !caseId) return;
+    if (previousVisitedAt !== undefined) return;
+    let cancelled = false;
+    api
+      .markCaseVisited(caseId)
+      .then((r) => {
+        if (!cancelled) setPreviousVisitedAt(r.previous_visited_at);
+      })
+      .catch(() => {
+        // If the visit call fails, fall back to "first visit" treatment so
+        // the welcome card still renders useful content.
+        if (!cancelled) setPreviousVisitedAt(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, caseId, previousVisitedAt]);
 
   // Auto-select the Review tab when the agent still needs answers.
   // Only runs when the user hasn't already switched tabs.
@@ -104,6 +132,14 @@ export default function CaseDetailPage() {
 
         {/* Sidebar */}
         <div className="hidden w-80 overflow-y-auto bg-gray-50 p-4 lg:block">
+          {previousVisitedAt !== undefined && (
+            <CaseWelcomeBack
+              activeCase={activeCase}
+              previousVisitedAt={previousVisitedAt}
+              onJumpToReview={() => setSidebarTab("review")}
+              onJumpToStrategy={() => setSidebarTab("strategy")}
+            />
+          )}
           <Tabs value={sidebarTab ?? "strategy"} onValueChange={setSidebarTab}>
             <TabsList className="w-full">
               <TabsTrigger value="review" className="flex-1">

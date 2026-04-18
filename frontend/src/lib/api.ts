@@ -115,6 +115,13 @@ class ApiClient {
     );
   }
 
+  async markCaseVisited(caseId: string) {
+    return this.request<import("./types").VisitResponse>(
+      `/api/cases/${caseId}/visit`,
+      { method: "POST" },
+    );
+  }
+
   // Case Questions (intake review)
   async listQuestions(caseId: string) {
     return this.request<Array<import("./types").CaseQuestion>>(

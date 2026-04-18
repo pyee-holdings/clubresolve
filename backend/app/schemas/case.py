@@ -55,7 +55,21 @@ class CaseResponse(BaseModel):
     missing_info: list[str] | None
     plan_status: str
     plan_generated_at: datetime | None
+    last_visited_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class VisitResponse(BaseModel):
+    """Returned from POST /api/cases/:id/visit.
+
+    ``previous_visited_at`` is the value BEFORE this visit updated it. The
+    UI uses it to compute what changed since the user was last here.
+    ``current_visited_at`` is when this visit was recorded — use it for
+    the "Welcome back, last visit N minutes ago" header.
+    """
+
+    previous_visited_at: datetime | None
+    current_visited_at: datetime

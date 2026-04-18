@@ -1,6 +1,7 @@
 """Case CRUD endpoints."""
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import delete, select
@@ -12,7 +13,7 @@ from app.models.case import Case
 from app.models.evidence_request import EvidenceRequest
 from app.models.question import CaseQuestion
 from app.api.auth import get_current_user
-from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
+from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse, VisitResponse
 from app.services.intake_review import run_intake_review_background
 from app.services.strategic_planner import run_planner_background
 
@@ -160,6 +161,35 @@ async def retry_intake_review(
 
     background_tasks.add_task(run_intake_review_background, case_id)
     return case
+
+
+@router.post("/{case_id}/visit", response_model=VisitResponse)
+async def mark_case_visited(
+    case_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record that the user has opened this case.
+
+    Returns the PREVIOUS last_visited_at (before this call) alongside the
+    new value. The frontend uses the previous value to compute "what's
+    new since your last visit" against entity created_at timestamps.
+
+    Called by the case detail page on mount. Safe to call repeatedly —
+    the previous_visited_at will simply move forward with each call.
+    """
+    result = await db.execute(
+        select(Case).where(Case.id == case_id, Case.user_id == current_user.id)
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    previous = case.last_visited_at
+    current = datetime.utcnow()
+    case.last_visited_at = current
+    await db.flush()
+    return VisitResponse(previous_visited_at=previous, current_visited_at=current)
 
 
 @router.post("/{case_id}/plan/regenerate", response_model=CaseResponse)
