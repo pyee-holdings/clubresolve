@@ -32,6 +32,7 @@ export interface Case {
   people_involved: { name: string; role: string }[] | null;
   prior_attempts: string | null;
   status: string;
+  review_status: "pending" | "reviewing" | "needs_input" | "complete";
   escalation_level: number;
   strategy_plan: string | null;
   legal_summary: string | null;
@@ -39,6 +40,45 @@ export interface Case {
   missing_info: string[] | null;
   created_at: string;
   updated_at: string;
+}
+
+export type QuestionStatus = "open" | "answered" | "dismissed";
+export type QuestionPriority = "critical" | "important" | "nice_to_have";
+
+export interface CaseQuestion {
+  id: string;
+  case_id: string;
+  question: string;
+  context: string | null;
+  category: string;
+  priority: QuestionPriority;
+  generated_by: string;
+  status: QuestionStatus;
+  answer: string | null;
+  answered_at: string | null;
+  created_at: string;
+}
+
+export type EvidenceRequestStatus =
+  | "open"
+  | "fulfilled"
+  | "unavailable"
+  | "dismissed";
+
+export interface EvidenceRequest {
+  id: string;
+  case_id: string;
+  title: string;
+  description: string | null;
+  evidence_type: string;
+  expected_date: string | null;
+  priority: "critical" | "important" | "nice_to_have";
+  generated_by: string;
+  status: EvidenceRequestStatus;
+  fulfilled_at: string | null;
+  evidence_item_id: string | null;
+  unavailable_reason: string | null;
+  created_at: string;
 }
 
 export interface ChatMessage {
@@ -65,6 +105,7 @@ export interface EvidenceItem {
   collected_by: string;
   event_date: string | null;
   unanswered_questions: string[] | null;
+  source_request_id: string | null;
   created_at: string;
 }
 

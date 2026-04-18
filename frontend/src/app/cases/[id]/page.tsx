@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { useCaseStore } from "@/stores/caseStore";
 import { ChatPanel } from "@/components/chat/ChatPanel";
+import { ReviewPanel } from "@/components/intake/ReviewPanel";
+import { EvidenceRequestPanel } from "@/components/intake/EvidenceRequestPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +19,7 @@ export default function CaseDetailPage() {
   const caseId = params.id as string;
   const { user, isLoading, loadFromStorage } = useAuthStore();
   const { activeCase, loadCase } = useCaseStore();
+  const [sidebarTab, setSidebarTab] = useState<string | null>(null);
 
   useEffect(() => {
     loadFromStorage();
@@ -29,6 +32,21 @@ export default function CaseDetailPage() {
       loadCase(caseId);
     }
   }, [user, isLoading, caseId, router, loadCase]);
+
+  // Auto-select the Review tab when the agent still needs answers.
+  // Only runs when the user hasn't already switched tabs.
+  useEffect(() => {
+    if (sidebarTab !== null) return;
+    if (!activeCase) return;
+    if (
+      activeCase.review_status === "needs_input" ||
+      activeCase.review_status === "reviewing"
+    ) {
+      setSidebarTab("review");
+    } else {
+      setSidebarTab("strategy");
+    }
+  }, [activeCase, sidebarTab]);
 
   if (isLoading || !user || !activeCase) {
     return (
@@ -85,11 +103,32 @@ export default function CaseDetailPage() {
 
         {/* Sidebar */}
         <div className="hidden w-80 overflow-y-auto bg-gray-50 p-4 lg:block">
-          <Tabs defaultValue="strategy">
+          <Tabs value={sidebarTab ?? "strategy"} onValueChange={setSidebarTab}>
             <TabsList className="w-full">
+              <TabsTrigger value="review" className="flex-1">
+                Review
+                {(activeCase.review_status === "needs_input" ||
+                  activeCase.review_status === "reviewing") && (
+                  <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
+                    !
+                  </span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="strategy" className="flex-1">Strategy</TabsTrigger>
               <TabsTrigger value="info" className="flex-1">Info</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="review" className="space-y-4">
+              <ReviewPanel
+                caseId={caseId}
+                reviewStatus={activeCase.review_status}
+                onAnyChange={() => loadCase(caseId)}
+              />
+              <EvidenceRequestPanel
+                caseId={caseId}
+                onAnyChange={() => loadCase(caseId)}
+              />
+            </TabsContent>
 
             <TabsContent value="strategy" className="space-y-4">
               {/* Risk Flags */}

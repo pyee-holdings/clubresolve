@@ -52,6 +52,11 @@ class Case(Base):
     # LangGraph integration
     langgraph_thread_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
+    # Intake review state: pending | reviewing | needs_input | complete
+    # Orthogonal to `status` — tracks whether the systematic review has produced
+    # its clarifying questions and whether the user has resolved them.
+    review_status: Mapped[str] = mapped_column(String(20), default="pending")
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -62,3 +67,5 @@ class Case(Base):
     evidence_items: Mapped[list["EvidenceItem"]] = relationship(back_populates="case", cascade="all, delete-orphan")  # noqa: F821
     timeline_events: Mapped[list["TimelineEvent"]] = relationship(back_populates="case", cascade="all, delete-orphan")  # noqa: F821
     drafts: Mapped[list["Draft"]] = relationship(back_populates="case", cascade="all, delete-orphan")  # noqa: F821
+    questions: Mapped[list["CaseQuestion"]] = relationship(back_populates="case", cascade="all, delete-orphan")  # noqa: F821
+    evidence_requests: Mapped[list["EvidenceRequest"]] = relationship(back_populates="case", cascade="all, delete-orphan")  # noqa: F821

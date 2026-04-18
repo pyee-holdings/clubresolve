@@ -47,6 +47,7 @@ class CaseResponse(BaseModel):
     people_involved: list[dict] | None
     prior_attempts: str | None
     status: str
+    review_status: str
     escalation_level: int
     strategy_plan: str | None
     legal_summary: str | None

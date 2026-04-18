@@ -35,6 +35,16 @@ class EvidenceItem(Base):
     contradicts_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("evidence_items.id"), nullable=True)
     unanswered_questions: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Questions this evidence raises
 
+    # Reverse link to the EvidenceRequest this item fulfilled, if any.
+    # FK uses `use_alter=True` because evidence_requests also has a FK back to
+    # evidence_items — SQLAlchemy needs to defer the constraint to avoid a
+    # circular CREATE TABLE ordering error.
+    source_request_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("evidence_requests.id", use_alter=True, name="fk_evidence_source_request"),
+        nullable=True,
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

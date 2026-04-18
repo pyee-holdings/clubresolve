@@ -29,6 +29,7 @@ class EvidenceResponse(BaseModel):
     collected_by: str
     event_date: str | None
     unanswered_questions: list[str] | None
+    source_request_id: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -2,15 +2,18 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User
 from app.models.case import Case
+from app.models.evidence_request import EvidenceRequest
+from app.models.question import CaseQuestion
 from app.api.auth import get_current_user
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
+from app.services.intake_review import run_intake_review_background
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -18,10 +21,16 @@ router = APIRouter(prefix="/api/cases", tags=["cases"])
 @router.post("", response_model=CaseResponse)
 async def create_case(
     case_data: CaseCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new case from structured intake form."""
+    """Create a new case from structured intake form.
+
+    After the case is saved, an intake review runs in the background to
+    produce clarifying questions for the user. The endpoint returns
+    immediately; the frontend polls /questions to pick them up.
+    """
     case = Case(
         user_id=current_user.id,
         title=case_data.title,
@@ -39,6 +48,10 @@ async def create_case(
     )
     db.add(case)
     await db.flush()
+    case_id = case.id
+    await db.commit()
+
+    background_tasks.add_task(run_intake_review_background, case_id)
     return case
 
 
@@ -107,3 +120,42 @@ async def delete_case(
 
     await db.delete(case)
     return {"detail": "Case deleted"}
+
+
+@router.post("/{case_id}/review/retry", response_model=CaseResponse)
+async def retry_intake_review(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run the intake review for this case.
+
+    Use when the background review got stuck in ``reviewing`` (worker died
+    mid-flight) or when the user added an API key after creating the case
+    and now wants a review. Clears all agent-generated questions and
+    evidence requests, resets review_status to ``pending``, and kicks off
+    a fresh background task.
+
+    Only deletes agent-generated items. Does not touch user-created
+    evidence items in the vault.
+    """
+    result = await db.execute(
+        select(Case).where(Case.id == case_id, Case.user_id == current_user.id)
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    await db.execute(delete(CaseQuestion).where(CaseQuestion.case_id == case_id))
+    await db.execute(
+        delete(EvidenceRequest).where(
+            EvidenceRequest.case_id == case_id,
+            EvidenceRequest.generated_by == "intake_review_agent",
+        )
+    )
+    case.review_status = "pending"
+    await db.commit()
+
+    background_tasks.add_task(run_intake_review_background, case_id)
+    return case

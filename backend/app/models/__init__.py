@@ -5,6 +5,8 @@ from app.models.case import Case, CaseStatus
 from app.models.evidence import EvidenceItem, TimelineEvent
 from app.models.message import ChatMessage
 from app.models.draft import Draft, DraftStatus
+from app.models.question import CaseQuestion, QuestionStatus, QuestionPriority
+from app.models.evidence_request import EvidenceRequest, EvidenceRequestStatus
 from app.models.wizard import WizardSubmission
 
 __all__ = [
@@ -17,5 +19,10 @@ __all__ = [
     "ChatMessage",
     "Draft",
     "DraftStatus",
+    "CaseQuestion",
+    "QuestionStatus",
+    "QuestionPriority",
+    "EvidenceRequest",
+    "EvidenceRequestStatus",
     "WizardSubmission",
 ]

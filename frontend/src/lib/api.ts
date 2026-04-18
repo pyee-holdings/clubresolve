@@ -101,6 +101,116 @@ class ApiClient {
     return this.request(`/api/cases/${caseId}`, { method: "DELETE" });
   }
 
+  async retryIntakeReview(caseId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/cases/${caseId}/review/retry`,
+      { method: "POST" },
+    );
+  }
+
+  // Case Questions (intake review)
+  async listQuestions(caseId: string) {
+    return this.request<Array<import("./types").CaseQuestion>>(
+      `/api/cases/${caseId}/questions`,
+    );
+  }
+
+  async answerQuestion(caseId: string, questionId: string, answer: string) {
+    return this.request<import("./types").CaseQuestion>(
+      `/api/cases/${caseId}/questions/${questionId}/answer`,
+      { method: "POST", body: JSON.stringify({ answer }) },
+    );
+  }
+
+  async dismissQuestion(caseId: string, questionId: string, reason?: string) {
+    return this.request<import("./types").CaseQuestion>(
+      `/api/cases/${caseId}/questions/${questionId}/dismiss`,
+      { method: "POST", body: JSON.stringify({ reason: reason ?? null }) },
+    );
+  }
+
+  // Evidence requests
+  async listEvidenceRequests(caseId: string) {
+    return this.request<Array<import("./types").EvidenceRequest>>(
+      `/api/cases/${caseId}/evidence-requests`,
+    );
+  }
+
+  async fulfillEvidenceRequestText(
+    caseId: string,
+    requestId: string,
+    payload: {
+      content: string;
+      title?: string | null;
+      source_reference?: string | null;
+      event_date?: string | null;
+    },
+  ) {
+    return this.request<import("./types").EvidenceRequest>(
+      `/api/cases/${caseId}/evidence-requests/${requestId}/fulfill-text`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content: payload.content,
+          title: payload.title ?? null,
+          source_reference: payload.source_reference ?? null,
+          event_date: payload.event_date ?? null,
+        }),
+      },
+    );
+  }
+
+  async fulfillEvidenceRequestFile(
+    caseId: string,
+    requestId: string,
+    file: File,
+    opts: {
+      title?: string;
+      source_reference?: string;
+      event_date?: string;
+    } = {},
+  ) {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts.title) form.append("title", opts.title);
+    if (opts.source_reference) form.append("source_reference", opts.source_reference);
+    if (opts.event_date) form.append("event_date", opts.event_date);
+    const res = await fetch(
+      `${API_BASE}/api/cases/${caseId}/evidence-requests/${requestId}/fulfill-file`,
+      {
+        method: "POST",
+        headers: this.token ? { Authorization: `Bearer ${this.token}` } : undefined,
+        body: form,
+      },
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Upload failed" }));
+      throw new Error(err.detail || "Upload failed");
+    }
+    return (await res.json()) as import("./types").EvidenceRequest;
+  }
+
+  async markEvidenceRequestUnavailable(
+    caseId: string,
+    requestId: string,
+    reason?: string,
+  ) {
+    return this.request<import("./types").EvidenceRequest>(
+      `/api/cases/${caseId}/evidence-requests/${requestId}/mark-unavailable`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason: reason ?? null }),
+      },
+    );
+  }
+
+  async dismissEvidenceRequest(caseId: string, requestId: string) {
+    return this.request<import("./types").EvidenceRequest>(
+      `/api/cases/${caseId}/evidence-requests/${requestId}/dismiss`,
+      { method: "POST" },
+    );
+  }
+
   // Chat (SSE streaming)
   async sendMessage(caseId: string, message: string): Promise<ReadableStream<Uint8Array> | null> {
     const res = await fetch(`${API_BASE}/api/cases/${caseId}/chat`, {

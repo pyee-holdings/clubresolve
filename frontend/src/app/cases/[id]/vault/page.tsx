@@ -7,8 +7,8 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, FileText, Calendar, Download, ChevronDown, ChevronRight } from "lucide-react";
-import type { EvidenceItem, TimelineEvent } from "@/lib/types";
+import { ArrowLeft, Plus, FileText, Calendar, Download, ChevronDown, ChevronRight, Paperclip } from "lucide-react";
+import type { EvidenceItem, EvidenceRequest, TimelineEvent } from "@/lib/types";
 
 export default function VaultPage() {
   const router = useRouter();
@@ -17,6 +17,7 @@ export default function VaultPage() {
   const { user, isLoading, loadFromStorage } = useAuthStore();
   const [evidence, setEvidence] = useState<EvidenceItem[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [requestsById, setRequestsById] = useState<Record<string, EvidenceRequest>>({});
   const [activeTab, setActiveTab] = useState<"evidence" | "timeline">("evidence");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -26,6 +27,11 @@ export default function VaultPage() {
     if (user && caseId) {
       api.listEvidence(caseId).then((r) => setEvidence(r as unknown as EvidenceItem[]));
       api.getTimeline(caseId).then((r) => setTimeline(r as unknown as TimelineEvent[]));
+      api.listEvidenceRequests(caseId).then((rs) => {
+        const map: Record<string, EvidenceRequest> = {};
+        for (const r of rs) map[r.id] = r;
+        setRequestsById(map);
+      });
     }
   }, [user, caseId]);
 
@@ -107,6 +113,15 @@ export default function VaultPage() {
                           </div>
                           {item.description && (
                             <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+                          )}
+                          {item.source_request_id && requestsById[item.source_request_id] && (
+                            <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                              <Paperclip className="h-3 w-3" />
+                              Provided in response to:{" "}
+                              <span className="italic">
+                                {requestsById[item.source_request_id].title}
+                              </span>
+                            </p>
                           )}
                           {item.source_reference && (
                             <p className="mt-1 text-xs text-muted-foreground">
