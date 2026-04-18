@@ -57,6 +57,13 @@ class Case(Base):
     # its clarifying questions and whether the user has resolved them.
     review_status: Mapped[str] = mapped_column(String(20), default="pending")
 
+    # Strategic plan lifecycle (Phase C). `plan_generated_at` is null until
+    # the planner runs for the first time. `plan_status` is one of
+    # idle | planning | ready | error — idle means the planner has never
+    # been asked to run.
+    plan_status: Mapped[str] = mapped_column(String(20), default="idle")
+    plan_generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

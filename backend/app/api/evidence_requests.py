@@ -11,6 +11,7 @@ from datetime import datetime
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -33,6 +34,7 @@ from app.schemas.evidence_request import (
     MarkUnavailableRequest,
 )
 from app.services.review_status import refresh_review_status
+from app.services.strategic_planner import run_planner_background
 
 # 25 MB cap on uploaded evidence files.
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -72,6 +74,30 @@ async def _load_case_and_request(
     if er is None:
         raise HTTPException(status_code=404, detail="Evidence request not found")
     return case, er
+
+
+async def _maybe_fire_planner(
+    case: Case,
+    prev_status: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+) -> None:
+    """Fire the strategic planner once the review flips to complete.
+
+    Skips if the planner is already running so concurrent resolutions on
+    separate items (e.g., from two browser tabs) don't launch two planners.
+
+    Commits eagerly so the background task's fresh session sees the
+    ``planning`` marker — otherwise the task can race the dependency-teardown
+    commit.
+    """
+    if prev_status == "complete" or case.review_status != "complete":
+        return
+    if case.plan_status == "planning":
+        return
+    case.plan_status = "planning"
+    await db.commit()
+    background_tasks.add_task(run_planner_background, case.id)
 
 
 async def _claim_request(
@@ -171,6 +197,7 @@ async def fulfill_with_text(
     case_id: str,
     request_id: str,
     payload: FulfillWithTextRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -179,6 +206,7 @@ async def fulfill_with_text(
     Creates an EvidenceItem with the provided content and links it to the request.
     """
     case, er = await _load_case_and_request(case_id, request_id, current_user, db)
+    prev_status = case.review_status
     if er.status != EvidenceRequestStatus.OPEN:
         raise HTTPException(
             status_code=409, detail=f"Request already {er.status.value}"
@@ -205,6 +233,7 @@ async def fulfill_with_text(
     await db.refresh(er)  # pick up the status/fulfilled_at the update set
     er.evidence_item_id = item.id
     await refresh_review_status(case, db)
+    await _maybe_fire_planner(case, prev_status, background_tasks, db)
     await db.flush()
     return er
 
@@ -213,6 +242,7 @@ async def fulfill_with_text(
 async def fulfill_with_file(
     case_id: str,
     request_id: str,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     source_reference: str | None = Form(default=None),
@@ -226,6 +256,7 @@ async def fulfill_with_file(
     buffering the whole body in memory.
     """
     case, er = await _load_case_and_request(case_id, request_id, current_user, db)
+    prev_status = case.review_status
     if er.status != EvidenceRequestStatus.OPEN:
         raise HTTPException(
             status_code=409, detail=f"Request already {er.status.value}"
@@ -276,6 +307,7 @@ async def fulfill_with_file(
     await db.refresh(er)
     er.evidence_item_id = item.id
     await refresh_review_status(case, db)
+    await _maybe_fire_planner(case, prev_status, background_tasks, db)
     await db.flush()
     return er
 
@@ -287,10 +319,12 @@ async def mark_unavailable(
     case_id: str,
     request_id: str,
     payload: MarkUnavailableRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     case, er = await _load_case_and_request(case_id, request_id, current_user, db)
+    prev_status = case.review_status
     if er.status == EvidenceRequestStatus.FULFILLED:
         raise HTTPException(
             status_code=409, detail="Cannot mark a fulfilled request unavailable"
@@ -300,6 +334,7 @@ async def mark_unavailable(
     er.unavailable_reason = (payload.reason or "").strip() or None
     er.fulfilled_at = datetime.utcnow()  # reused as "resolved_at"
     await refresh_review_status(case, db)
+    await _maybe_fire_planner(case, prev_status, background_tasks, db)
     await db.flush()
     return er
 
@@ -308,10 +343,12 @@ async def mark_unavailable(
 async def dismiss_request(
     case_id: str,
     request_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     case, er = await _load_case_and_request(case_id, request_id, current_user, db)
+    prev_status = case.review_status
     if er.status == EvidenceRequestStatus.FULFILLED:
         raise HTTPException(
             status_code=409, detail="Cannot dismiss a fulfilled request"
@@ -320,5 +357,6 @@ async def dismiss_request(
     er.status = EvidenceRequestStatus.DISMISSED
     er.fulfilled_at = datetime.utcnow()
     await refresh_review_status(case, db)
+    await _maybe_fire_planner(case, prev_status, background_tasks, db)
     await db.flush()
     return er

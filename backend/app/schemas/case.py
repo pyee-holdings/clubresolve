@@ -53,6 +53,8 @@ class CaseResponse(BaseModel):
     legal_summary: str | None
     next_steps: list[dict] | None
     missing_info: list[str] | None
+    plan_status: str
+    plan_generated_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

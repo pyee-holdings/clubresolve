@@ -14,6 +14,7 @@ from app.models.question import CaseQuestion
 from app.api.auth import get_current_user
 from app.schemas.case import CaseCreate, CaseUpdate, CaseResponse
 from app.services.intake_review import run_intake_review_background
+from app.services.strategic_planner import run_planner_background
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -158,4 +159,30 @@ async def retry_intake_review(
     await db.commit()
 
     background_tasks.add_task(run_intake_review_background, case_id)
+    return case
+
+
+@router.post("/{case_id}/plan/regenerate", response_model=CaseResponse)
+async def regenerate_plan(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kick off a strategic planner run. Returns immediately; the plan is
+    produced in the background. Frontend should poll ``plan_status`` until
+    it is ``ready`` or ``error``.
+
+    Safe to call at any time; overwrites the existing plan fields.
+    """
+    result = await db.execute(
+        select(Case).where(Case.id == case_id, Case.user_id == current_user.id)
+    )
+    case = result.scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    case.plan_status = "planning"
+    await db.commit()
+    background_tasks.add_task(run_planner_background, case_id)
     return case

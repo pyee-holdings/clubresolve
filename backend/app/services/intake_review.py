@@ -28,6 +28,7 @@ from app.models.user import APIKeyConfig
 from app.schemas.evidence_request import EVIDENCE_TYPES
 from app.services.crypto import decrypt_api_key
 from app.services.llm_router import DEFAULT_MODELS, get_litellm_model_name
+from app.services.strategic_planner import run_planner_background
 
 logger = logging.getLogger(__name__)
 
@@ -351,12 +352,25 @@ async def generate_intake_questions(
         db.add(er)
         e_created += 1
 
+    plan_immediately = False
     if q_created > 0 or e_created > 0:
         case.review_status = "needs_input"
     else:
         # Model returned nothing we could parse; don't block the user.
+        # Go straight into planning — we have enough to produce an initial plan.
         case.review_status = "complete"
+        case.plan_status = "planning"
+        plan_immediately = True
     await db.commit()
+
+    if plan_immediately:
+        # Run the planner in a fresh session so a planner failure can never
+        # roll back the review completion we just committed above.
+        try:
+            await run_planner_background(case_id)
+        except Exception:
+            logger.exception("Initial planner call failed for case %s", case_id)
+
     return ReviewResult(
         questions_created=q_created, evidence_requests_created=e_created
     )

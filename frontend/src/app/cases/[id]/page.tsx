@@ -7,11 +7,12 @@ import { useCaseStore } from "@/stores/caseStore";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ReviewPanel } from "@/components/intake/ReviewPanel";
 import { EvidenceRequestPanel } from "@/components/intake/EvidenceRequestPanel";
+import { StrategyPanel } from "@/components/strategy/StrategyPanel";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Archive, PenTool, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Archive, PenTool } from "lucide-react";
 
 export default function CaseDetailPage() {
   const router = useRouter();
@@ -131,93 +132,10 @@ export default function CaseDetailPage() {
             </TabsContent>
 
             <TabsContent value="strategy" className="space-y-4">
-              {/* Risk Flags */}
-              {activeCase.risk_flags && activeCase.risk_flags.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-1 text-sm">
-                      <AlertTriangle className="h-4 w-4 text-red-500" /> Risk Flags
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-1">
-                      {activeCase.risk_flags.map((flag) => (
-                        <Badge key={flag} variant="destructive" className="text-xs">
-                          {flag.replace(/_/g, " ")}
-                        </Badge>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Next Steps */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Next Steps</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {activeCase.next_steps && activeCase.next_steps.length > 0 ? (
-                    <ol className="space-y-2 text-sm">
-                      {activeCase.next_steps.map((step, i) => (
-                        <li key={i} className="flex gap-2">
-                          <span className="font-medium text-primary">{i + 1}.</span>
-                          <div>
-                            <p>{step.step}</p>
-                            {step.due && (
-                              <p className="text-xs text-muted-foreground">Due: {step.due}</p>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      Chat with the Navigator to get your action plan.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Missing Info */}
-              {activeCase.missing_info && activeCase.missing_info.length > 0 && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Missing Information</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-1 text-sm text-muted-foreground">
-                      {activeCase.missing_info.map((info, i) => (
-                        <li key={i}>- {info}</li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Escalation Level */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Escalation Level</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    {[0, 1, 2, 3].map((level) => (
-                      <div
-                        key={level}
-                        className={`h-2 flex-1 rounded-full ${
-                          level <= activeCase.escalation_level
-                            ? "bg-orange-400"
-                            : "bg-gray-200"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {["Internal", "Governing Body", "Formal Complaint", "Legal"][activeCase.escalation_level]}
-                  </p>
-                </CardContent>
-              </Card>
+              <StrategyPanel
+                activeCase={activeCase}
+                onCaseChange={() => loadCase(caseId)}
+              />
             </TabsContent>
 
             <TabsContent value="info" className="space-y-4">

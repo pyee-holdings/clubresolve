@@ -40,6 +40,9 @@ _COLUMN_BACKFILLS: list[tuple[str, str, str]] = [
     # Phase B: reverse link from a vault item back to the EvidenceRequest that
     # spawned it. Nullable — pre-existing items have no source request.
     ("evidence_items", "source_request_id", "VARCHAR(36)"),
+    # Phase C: strategic planner lifecycle.
+    ("cases", "plan_status", "VARCHAR(20) NOT NULL DEFAULT 'idle'"),
+    ("cases", "plan_generated_at", "DATETIME"),
 ]
 
 

@@ -108,6 +108,13 @@ class ApiClient {
     );
   }
 
+  async regeneratePlan(caseId: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/cases/${caseId}/plan/regenerate`,
+      { method: "POST" },
+    );
+  }
+
   // Case Questions (intake review)
   async listQuestions(caseId: string) {
     return this.request<Array<import("./types").CaseQuestion>>(

@@ -36,10 +36,19 @@ export interface Case {
   escalation_level: number;
   strategy_plan: string | null;
   legal_summary: string | null;
-  next_steps: { step: string; due: string; priority: string }[] | null;
+  next_steps: PlanStep[] | null;
   missing_info: string[] | null;
+  plan_status: "idle" | "planning" | "ready" | "error";
+  plan_generated_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PlanStep {
+  step: string;
+  why?: string | null;
+  due?: string | null;
+  priority?: "critical" | "important" | "nice_to_have";
 }
 
 export type QuestionStatus = "open" | "answered" | "dismissed";
